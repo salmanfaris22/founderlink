@@ -37,10 +37,10 @@ type Config struct {
 
 func loadConfig() Config {
 	return Config{
-		Port:        envOr("PORT", "8080"),
-		DatabaseURL: envOr("DATABASE_URL", "postgresql://postgres:Salman@40567633800@db.vounmegpaovvrfffolyf.supabase.co:5432/postgres?sslmode=require"),
-		JWTSecret:   envOr("JWT_SECRET", "founderlink-secret-change-me"),
-		Env:         envOr("ENV", "development"),
+		Port:        "8080",
+		DatabaseURL: "postgresql://postgres.apfhqcndjsawcqposimc:Space1280909lsfnglaksn@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require",
+		JWTSecret:   "founderlink-secret-change-me",
+		Env:         "development",
 	}
 }
 func envOr(k, d string) string {
