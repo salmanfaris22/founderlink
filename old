@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -2098,19 +2096,15 @@ const keyUID ctxKey = "uid"
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		ww := wrappedWriter{w} // ✅ important
-
-		ww.Header().Set("Access-Control-Allow-Origin", "*")
-		ww.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		ww.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization,Content-Type,Accept")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
-		next.ServeHTTP(ww, r)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -2124,16 +2118,9 @@ func (r *rrw) WriteHeader(code int) { r.status = code; r.ResponseWriter.WriteHea
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
-		ww := wrappedWriter{w} // ✅ use wrapped writer
-
-		next.ServeHTTP(ww, r)
-
-		log.Info("http",
-			zap.String("m", r.Method),
-			zap.String("p", r.URL.Path),
-			zap.String("t", time.Since(start).String()),
-		)
+		rw := &rrw{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rw, r)
+		log.Info("http", zap.String("m", r.Method), zap.String("p", r.URL.Path), zap.Int("s", rw.status), zap.Duration("t", time.Since(start)))
 	})
 }
 
@@ -2897,13 +2884,4 @@ func main() {
 	defer shutCancel()
 	srv.Shutdown(shutCtx)
 	log.Info("stopped")
-}
-
-type wrappedWriter struct {
-	http.ResponseWriter
-}
-
-// ✅ This is the key fix
-func (w wrappedWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return w.ResponseWriter.(http.Hijacker).Hijack()
 }

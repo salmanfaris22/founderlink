@@ -1757,7 +1757,6 @@ async function renderMySpace(){
       <button class="tab" onclick="myTab(this,'my-projects');loadMyProjects()">🚀 Projects</button>
       <button class="tab" onclick="myTab(this,'my-ideas');loadMyIdeas()">💡 Ideas</button>
       <button class="tab" onclick="myTab(this,'my-invites');loadMyInvites()">📨 Invites</button>
-      <button class="tab" onclick="myTab(this,'my-invites');loadMyInvites()"> My Applications </button>
     </div>
     <div id="my-posts">${spin()}</div>
     <div id="my-projects" class="hidden">${spin()}</div>

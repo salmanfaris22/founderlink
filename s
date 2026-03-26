@@ -1,1 +1,11 @@
 all chat and change to web soket also the notifcation to live websotket and deafalut sections is Expolorer,  in proeajct secions,  dont show Tasks everu its only for team memebers, or admin allowd team mebrs can be show curret task task block admin can create or admin allowd peoplea can creat like Backlog,To Do its amdin craeteing task also ceate admin or admin allowd pelaples cn created task and drag adn drop task and there under peaocjt admin can craete multem grwuth with emembrs and invested there chat be privite also , in proajct task secions a button full vewi  that show task like full views and user a uniq user name it login time ceate or uniq automatical ceate it can be change add member only this plant from users only, other base invaet like mail ,if possble to ee projeactsecion big screen  also grup mange mebe cnage grup name like and proaejct nots secion its like store proaejct documber like preoacjt datas ,  proefils aslo publich and private like insram followd reqst can be sent only if grup  sent to notificaion to user liky you got a proaject inviateion join grup in memebr list its show like pending after 7 day outomaticly that rejecting, add one more secions its show like comming soon in this proajct update this all changet ,also task section websoket regeneret full code main.go and index.html full code update this full and Projects navbar more user fraly set  give me full code
+
+
+func loadConfig() Config {
+	return Config{
+		Port:        envOr("PORT", "8080"),
+		DatabaseURL: envOr("DATABASE_URL", "postgres://postgres:password@localhost:5432/gemu?sslmode=disable"),
+		JWTSecret:   envOr("JWT_SECRET", "founderlink-secret-change-me"),
+		Env:         envOr("ENV", "development"),
+	}
+}

@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -104,7 +102,6 @@ func (d *DB) migrate(ctx context.Context) {
 	ddl := []string{
 		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
 		`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
-		// users — now with username, profile_public, follow_request
 		`CREATE TABLE IF NOT EXISTS users (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			username VARCHAR(40) UNIQUE NOT NULL,
@@ -136,7 +133,6 @@ func (d *DB) migrate(ctx context.Context) {
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_name_trgm ON users USING gin(name gin_trgm_ops)`,
-		// follow requests (for private accounts)
 		`CREATE TABLE IF NOT EXISTS follow_requests (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			requester_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -146,7 +142,6 @@ func (d *DB) migrate(ctx context.Context) {
 			UNIQUE(requester_id, target_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_fr_target ON follow_requests(target_id, status)`,
-		// posts
 		`CREATE TABLE IF NOT EXISTS posts (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -181,7 +176,6 @@ func (d *DB) migrate(ctx context.Context) {
 			vote_type VARCHAR(10) NOT NULL DEFAULT 'up',
 			PRIMARY KEY (user_id, post_id)
 		)`,
-		// comments
 		`CREATE TABLE IF NOT EXISTS comments (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -197,7 +191,6 @@ func (d *DB) migrate(ctx context.Context) {
 			comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
 			PRIMARY KEY (user_id, comment_id)
 		)`,
-		// follows
 		`CREATE TABLE IF NOT EXISTS follows (
 			follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			following_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -206,7 +199,6 @@ func (d *DB) migrate(ctx context.Context) {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id)`,
-		// projects
 		`CREATE TABLE IF NOT EXISTS projects (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -249,7 +241,6 @@ func (d *DB) migrate(ctx context.Context) {
 			viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			PRIMARY KEY (project_id, user_id)
 		)`,
-		// project sections — now with type (info, notes, coming_soon)
 		`CREATE TABLE IF NOT EXISTS project_sections (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -262,7 +253,6 @@ func (d *DB) migrate(ctx context.Context) {
 		)`,
 		`ALTER TABLE project_sections ADD COLUMN IF NOT EXISTS section_type VARCHAR(40) NOT NULL DEFAULT 'info'`,
 		`CREATE INDEX IF NOT EXISTS idx_sections_project ON project_sections(project_id, order_index)`,
-		// team members — now with is_admin, invite_expires_at
 		`CREATE TABLE IF NOT EXISTS team_members (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -278,7 +268,6 @@ func (d *DB) migrate(ctx context.Context) {
 		`ALTER TABLE team_members ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE team_members ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`,
 		`CREATE INDEX IF NOT EXISTS idx_team_project ON team_members(project_id)`,
-		// project join requests
 		`CREATE TABLE IF NOT EXISTS project_join_requests (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -290,7 +279,6 @@ func (d *DB) migrate(ctx context.Context) {
 			UNIQUE(project_id, user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_joinreq_project ON project_join_requests(project_id)`,
-		// tasks — with allowed_creators (admin system)
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -307,7 +295,6 @@ func (d *DB) migrate(ctx context.Context) {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id, status, order_index)`,
-		// investor interests
 		`CREATE TABLE IF NOT EXISTS investor_interests (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			investor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -319,7 +306,6 @@ func (d *DB) migrate(ctx context.Context) {
 			UNIQUE(investor_id, project_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_interests_project ON investor_interests(project_id)`,
-		// conversations — now with group management
 		`CREATE TABLE IF NOT EXISTS conversations (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
@@ -355,7 +341,6 @@ func (d *DB) migrate(ctx context.Context) {
 		)`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS msg_type VARCHAR(20) NOT NULL DEFAULT 'text'`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at DESC)`,
-		// notifications
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -368,8 +353,6 @@ func (d *DB) migrate(ctx context.Context) {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at DESC)`,
-		// Auto-reject expired invites: run as background job
-		// project_update_log for "coming soon" tracking
 		`CREATE TABLE IF NOT EXISTS project_updates (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -380,6 +363,39 @@ func (d *DB) migrate(ctx context.Context) {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_proj_updates ON project_updates(project_id, created_at DESC)`,
+		// Internship postings table
+		`CREATE TABLE IF NOT EXISTS internships (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			title VARCHAR(300) NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			role VARCHAR(120) NOT NULL DEFAULT '',
+			skills_needed TEXT[] NOT NULL DEFAULT '{}',
+			duration VARCHAR(100) NOT NULL DEFAULT '',
+			stipend VARCHAR(100) NOT NULL DEFAULT '',
+			is_remote BOOLEAN NOT NULL DEFAULT TRUE,
+			location VARCHAR(200) NOT NULL DEFAULT '',
+			is_paid_intern BOOLEAN NOT NULL DEFAULT FALSE,
+			deadline DATE,
+			applicants_count INT NOT NULL DEFAULT 0,
+			is_open BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_internships_project ON internships(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_internships_owner ON internships(owner_id)`,
+		`CREATE TABLE IF NOT EXISTS internship_applications (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			internship_id UUID NOT NULL REFERENCES internships(id) ON DELETE CASCADE,
+			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			cover_letter TEXT NOT NULL DEFAULT '',
+			portfolio_url TEXT NOT NULL DEFAULT '',
+			status VARCHAR(30) NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(internship_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_intern_apps ON internship_applications(internship_id)`,
 	}
 	ok, warn := 0, 0
 	for _, s := range ddl {
@@ -492,7 +508,7 @@ type ProjectSection struct {
 	ProjectID   string    `json:"project_id"`
 	Title       string    `json:"title"`
 	Content     string    `json:"content"`
-	SectionType string    `json:"section_type"` // info, notes, coming_soon
+	SectionType string    `json:"section_type"`
 	OrderIndex  int       `json:"order_index"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -609,6 +625,41 @@ type FollowRequest struct {
 	TargetID    string    `json:"target_id"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Internship models
+type Internship struct {
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	Project        *Project  `json:"project,omitempty"`
+	OwnerID        string    `json:"owner_id"`
+	Owner          *User     `json:"owner,omitempty"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Role           string    `json:"role"`
+	SkillsNeeded   []string  `json:"skills_needed"`
+	Duration       string    `json:"duration"`
+	Stipend        string    `json:"stipend"`
+	IsRemote       bool      `json:"is_remote"`
+	Location       string    `json:"location"`
+	IsPaidIntern   bool      `json:"is_paid_intern"`
+	Deadline       *string   `json:"deadline,omitempty"`
+	ApplicantsCount int      `json:"applicants_count"`
+	IsOpen         bool      `json:"is_open"`
+	HasApplied     bool      `json:"has_applied"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type InternshipApplication struct {
+	ID            string    `json:"id"`
+	InternshipID  string    `json:"internship_id"`
+	UserID        string    `json:"user_id"`
+	User          *User     `json:"user,omitempty"`
+	CoverLetter   string    `json:"cover_letter"`
+	PortfolioURL  string    `json:"portfolio_url"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // ═══════════════════════ JWT ═══════════════════════
@@ -733,7 +784,6 @@ var adjectives = []string{"swift", "bold", "bright", "cool", "dark", "epic", "fa
 var nouns = []string{"builder", "coder", "creator", "dev", "founder", "hacker", "maker", "pilot", "rider", "runner", "seeker", "thinker", "trader", "walker", "wizard"}
 
 func generateUsername(db *DB, ctx context.Context, base string) string {
-	// Clean base
 	cleaned := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(base, " ", ""), "-", ""))
 	if len(cleaned) > 12 {
 		cleaned = cleaned[:12]
@@ -741,7 +791,6 @@ func generateUsername(db *DB, ctx context.Context, base string) string {
 	if cleaned == "" {
 		cleaned = adjectives[rand.Intn(len(adjectives))] + nouns[rand.Intn(len(nouns))]
 	}
-	// Try base username
 	candidate := cleaned
 	for i := 0; i < 100; i++ {
 		var exists bool
@@ -767,10 +816,8 @@ type Svc struct {
 }
 
 const sqlUserCols = `id,username,name,email,avatar,cover_image,bio,headline,role,skills,location,website,linkedin,twitter,looking_for,is_investor,is_verified,is_public,followers_count,following_count,created_at`
-
 const sqlPostCols = `p.id,p.user_id,p.type,p.title,p.content,p.tags,p.media_url,p.likes_count,p.comments_count,p.shares_count,p.is_pinned,p.created_at,p.updated_at,u.id,u.username,u.name,u.avatar,u.headline,u.role,u.is_verified`
 const sqlPostJoin = `FROM posts p JOIN users u ON u.id=p.user_id`
-
 const sqlProjectCols = `id,owner_id,name,tagline,description,stage,industry,seeking,equity_offer,funding_needed,website,deck_url,logo,cover,views,interested_count,is_published,price,is_paid,pricing_description,progress_percent,progress_notes,progress_stage,created_at,updated_at`
 
 func scanUser(row pgx.Row) (*User, error) {
@@ -939,7 +986,6 @@ func (s *Svc) isProjectMember(ctx context.Context, projectID, userID string) boo
 	return exists
 }
 
-// Background job: auto-reject expired invites
 func (s *Svc) startBackgroundJobs(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -1017,7 +1063,6 @@ func (s *Svc) Login(ctx context.Context, email, password string) (string, *User,
 }
 
 func (s *Svc) UpdateProfile(ctx context.Context, userID string, b map[string]any) error {
-	// Handle username change
 	if newUsername, ok := b["username"].(string); ok && newUsername != "" {
 		newUsername = strings.ToLower(strings.ReplaceAll(newUsername, " ", ""))
 		var curUsername string
@@ -1064,7 +1109,6 @@ func (s *Svc) ToggleFollow(ctx context.Context, followerID, followingID string) 
 	if followerID == followingID {
 		return false, false, fmt.Errorf("cannot follow yourself")
 	}
-	// Check target's privacy
 	var isPublic bool
 	s.db.qrow(ctx, `SELECT is_public FROM users WHERE id=$1`, followingID).Scan(&isPublic)
 
@@ -1083,11 +1127,9 @@ func (s *Svc) ToggleFollow(ctx context.Context, followerID, followingID string) 
 	}
 
 	if !isPublic {
-		// Send follow request
 		var reqExists bool
 		s.db.qrow(ctx, `SELECT EXISTS(SELECT 1 FROM follow_requests WHERE requester_id=$1 AND target_id=$2)`, followerID, followingID).Scan(&reqExists)
 		if reqExists {
-			// Cancel request
 			s.db.exec(ctx, `DELETE FROM follow_requests WHERE requester_id=$1 AND target_id=$2`, followerID, followingID)
 			return false, false, nil
 		}
@@ -1098,7 +1140,7 @@ func (s *Svc) ToggleFollow(ctx context.Context, followerID, followingID string) 
 			msg = actor.Name + " wants to follow you"
 		}
 		s.notify(ctx, followingID, &followerID, "follow_request", msg, &followerID, "user")
-		return false, true, nil // pending
+		return false, true, nil
 	}
 
 	ct, err := s.db.pool.Exec(ctx, `INSERT INTO follows(follower_id,following_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, followerID, followingID)
@@ -1431,6 +1473,27 @@ func (s *Svc) ListProjects(ctx context.Context, callerID, stage, industry string
 	return out, nil
 }
 
+func (s *Svc) MyProjects(ctx context.Context, userID string) ([]Project, error) {
+	rows, err := s.db.query(ctx, `SELECT `+sqlProjectCols+` FROM projects WHERE owner_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Project
+	for rows.Next() {
+		p, err := scanProjectRow(rows)
+		if err != nil {
+			continue
+		}
+		p.Owner = s.GetUser(ctx, p.OwnerID, userID)
+		out = append(out, *p)
+	}
+	if out == nil {
+		out = []Project{}
+	}
+	return out, nil
+}
+
 func (s *Svc) IncrViews(ctx context.Context, id, userID string) {
 	ct, _ := s.db.pool.Exec(ctx, `INSERT INTO project_views(project_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, userID)
 	if ct.RowsAffected() > 0 {
@@ -1485,7 +1548,6 @@ func (s *Svc) DeleteSection(ctx context.Context, ownerID, sectionID string) erro
 	return s.db.exec(ctx, `DELETE FROM project_sections WHERE id=$1`, sectionID)
 }
 
-// Project Updates / Coming Soon
 func (s *Svc) ProjectUpdatesList(ctx context.Context, projectID string) ([]ProjectUpdate, error) {
 	rows, err := s.db.query(ctx, `SELECT id,project_id,title,content,is_coming_soon,release_date::text,created_at FROM project_updates WHERE project_id=$1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
@@ -1550,14 +1612,12 @@ func (s *Svc) AddTeamMember(ctx context.Context, ownerID string, m *TeamMember) 
 	if err := s.verifyProjectOwner(ctx, m.ProjectID, ownerID); err != nil {
 		return nil, err
 	}
-	// Must be an existing user if user_id is provided
 	if m.UserID != nil && *m.UserID != "" {
 		var exists bool
 		s.db.qrow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, *m.UserID).Scan(&exists)
 		if !exists {
 			return nil, fmt.Errorf("user not found")
 		}
-		// Get user name
 		var uname string
 		s.db.qrow(ctx, `SELECT name FROM users WHERE id=$1`, *m.UserID).Scan(&uname)
 		if m.Name == "" {
@@ -1575,7 +1635,6 @@ func (s *Svc) AddTeamMember(ctx context.Context, ownerID string, m *TeamMember) 
 		var pname string
 		s.db.qrow(ctx, `SELECT name FROM projects WHERE id=$1`, m.ProjectID).Scan(&pname)
 		s.notify(ctx, *m.UserID, &ownerID, "project_invite", "You got a project invitation to join: "+pname, &m.ProjectID, "project")
-		s.hub.push(*m.UserID, WSEvent{Type: "notification", Payload: map[string]any{"type": "project_invite", "message": "You got a project invitation to join: " + pname, "project_id": m.ProjectID}})
 	}
 	return m, nil
 }
@@ -1733,7 +1792,6 @@ func (s *Svc) CreateTask(ctx context.Context, task *Task) (*Task, error) {
 		task.ID, task.ProjectID, task.Title, task.Description, task.Status, task.Priority, task.AssigneeID, task.CreatedBy, task.DueDate, task.OrderIndex, task.Tags); err != nil {
 		return nil, err
 	}
-	// Push WS event to all project members
 	tasks, _ := s.ListTasks(ctx, task.ProjectID, task.CreatedBy)
 	for _, t := range tasks {
 		if t.ID == task.ID {
@@ -1755,7 +1813,6 @@ func (s *Svc) UpdateTask(ctx context.Context, taskID, callerID string, b map[str
 		taskID, b["title"], b["description"], b["status"], b["priority"], b["assignee_id"], b["due_date"], b["order_index"]); err != nil {
 		return nil, err
 	}
-	// Fetch updated task
 	tasks, _ := s.ListTasks(ctx, projectID, callerID)
 	for _, t := range tasks {
 		if t.ID == taskID {
@@ -1857,6 +1914,133 @@ func (s *Svc) UpdateInterestStatus(ctx context.Context, ownerID, interestID, sta
 		return fmt.Errorf("unauthorized")
 	}
 	return s.db.exec(ctx, `UPDATE investor_interests SET status=$2 WHERE id=$1`, interestID, status)
+}
+
+// ── Internship Service ──
+
+func (s *Svc) ListInternships(ctx context.Context, callerID, role, remote string, page, limit int) ([]Internship, error) {
+	conds := []string{"i.is_open=TRUE"}
+	var args []any
+	idx := 1
+	if role != "" {
+		conds = append(conds, fmt.Sprintf(`i.role ILIKE $%d`, idx))
+		args = append(args, "%"+role+"%")
+		idx++
+	}
+	if remote == "true" {
+		conds = append(conds, `i.is_remote=TRUE`)
+	}
+	args = append(args, limit, (page-1)*limit)
+	rows, err := s.db.query(ctx, `SELECT i.id,i.project_id,i.owner_id,i.title,i.description,i.role,i.skills_needed,i.duration,i.stipend,i.is_remote,i.location,i.is_paid_intern,i.deadline::text,i.applicants_count,i.is_open,i.created_at,i.updated_at FROM internships i WHERE `+strings.Join(conds, " AND ")+fmt.Sprintf(` ORDER BY i.created_at DESC LIMIT $%d OFFSET $%d`, idx, idx+1), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Internship
+	for rows.Next() {
+		intern := Internship{}
+		var skills []string
+		rows.Scan(&intern.ID, &intern.ProjectID, &intern.OwnerID, &intern.Title, &intern.Description, &intern.Role, &skills, &intern.Duration, &intern.Stipend, &intern.IsRemote, &intern.Location, &intern.IsPaidIntern, &intern.Deadline, &intern.ApplicantsCount, &intern.IsOpen, &intern.CreatedAt, &intern.UpdatedAt)
+		if skills == nil {
+			skills = []string{}
+		}
+		intern.SkillsNeeded = skills
+		intern.Owner = s.GetUser(ctx, intern.OwnerID, "")
+		// Get project minimal info
+		p, _ := scanProjectRow(s.db.qrow(ctx, `SELECT `+sqlProjectCols+` FROM projects WHERE id=$1`, intern.ProjectID))
+		if p != nil {
+			intern.Project = p
+		}
+		if callerID != "" {
+			s.db.qrow(ctx, `SELECT EXISTS(SELECT 1 FROM internship_applications WHERE internship_id=$1 AND user_id=$2)`, intern.ID, callerID).Scan(&intern.HasApplied)
+		}
+		out = append(out, intern)
+	}
+	if out == nil {
+		out = []Internship{}
+	}
+	return out, nil
+}
+
+func (s *Svc) CreateInternship(ctx context.Context, ownerID string, intern *Internship) (*Internship, error) {
+	// verify project ownership
+	if err := s.verifyProjectOwner(ctx, intern.ProjectID, ownerID); err != nil {
+		return nil, err
+	}
+	intern.ID = uuid.New().String()
+	intern.OwnerID = ownerID
+	if intern.SkillsNeeded == nil {
+		intern.SkillsNeeded = []string{}
+	}
+	if err := s.db.exec(ctx, `INSERT INTO internships(id,project_id,owner_id,title,description,role,skills_needed,duration,stipend,is_remote,location,is_paid_intern,deadline,is_open) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::date,$14)`,
+		intern.ID, intern.ProjectID, ownerID, intern.Title, intern.Description, intern.Role, intern.SkillsNeeded, intern.Duration, intern.Stipend, intern.IsRemote, intern.Location, intern.IsPaidIntern, intern.Deadline, intern.IsOpen); err != nil {
+		return nil, err
+	}
+	intern.CreatedAt = time.Now()
+	intern.Owner = s.GetUser(ctx, ownerID, "")
+	return intern, nil
+}
+
+func (s *Svc) ApplyInternship(ctx context.Context, userID, internshipID, coverLetter, portfolioURL string) (*InternshipApplication, error) {
+	var exists bool
+	s.db.qrow(ctx, `SELECT EXISTS(SELECT 1 FROM internship_applications WHERE internship_id=$1 AND user_id=$2)`, internshipID, userID).Scan(&exists)
+	if exists {
+		return nil, fmt.Errorf("already applied")
+	}
+	id := uuid.New().String()
+	if err := s.db.exec(ctx, `INSERT INTO internship_applications(id,internship_id,user_id,cover_letter,portfolio_url) VALUES($1,$2,$3,$4,$5)`, id, internshipID, userID, coverLetter, portfolioURL); err != nil {
+		return nil, err
+	}
+	s.db.exec(ctx, `UPDATE internships SET applicants_count=applicants_count+1 WHERE id=$1`, internshipID)
+	// Notify owner
+	var ownerID string
+	s.db.qrow(ctx, `SELECT owner_id FROM internships WHERE id=$1`, internshipID).Scan(&ownerID)
+	if ownerID != "" && ownerID != userID {
+		msg := "applied for your internship"
+		if actor := s.GetUser(ctx, userID, ""); actor != nil {
+			msg = actor.Name + " applied for your internship"
+		}
+		s.notify(ctx, ownerID, &userID, "internship_apply", msg, &internshipID, "internship")
+	}
+	return &InternshipApplication{ID: id, InternshipID: internshipID, UserID: userID, CoverLetter: coverLetter, PortfolioURL: portfolioURL, Status: "pending", CreatedAt: time.Now()}, nil
+}
+
+func (s *Svc) ListInternshipApplications(ctx context.Context, ownerID, internshipID string) ([]InternshipApplication, error) {
+	// verify owner
+	var iOwnerID string
+	if err := s.db.qrow(ctx, `SELECT owner_id FROM internships WHERE id=$1`, internshipID).Scan(&iOwnerID); err != nil {
+		return nil, fmt.Errorf("not found")
+	}
+	if iOwnerID != ownerID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	rows, err := s.db.query(ctx, `SELECT id,internship_id,user_id,cover_letter,portfolio_url,status,created_at FROM internship_applications WHERE internship_id=$1 ORDER BY created_at DESC`, internshipID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []InternshipApplication
+	for rows.Next() {
+		app := InternshipApplication{}
+		rows.Scan(&app.ID, &app.InternshipID, &app.UserID, &app.CoverLetter, &app.PortfolioURL, &app.Status, &app.CreatedAt)
+		app.User = s.GetUser(ctx, app.UserID, "")
+		out = append(out, app)
+	}
+	if out == nil {
+		out = []InternshipApplication{}
+	}
+	return out, nil
+}
+
+func (s *Svc) UpdateInternshipAppStatus(ctx context.Context, ownerID, appID, status string) error {
+	var iOwnerID string
+	if err := s.db.qrow(ctx, `SELECT i.owner_id FROM internships i JOIN internship_applications ia ON ia.internship_id=i.id WHERE ia.id=$1`, appID).Scan(&iOwnerID); err != nil {
+		return fmt.Errorf("not found")
+	}
+	if iOwnerID != ownerID {
+		return fmt.Errorf("unauthorized")
+	}
+	return s.db.exec(ctx, `UPDATE internship_applications SET status=$2 WHERE id=$1`, appID, status)
 }
 
 // ── Messaging Service ──
@@ -2098,19 +2282,15 @@ const keyUID ctxKey = "uid"
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		ww := wrappedWriter{w} // ✅ important
-
-		ww.Header().Set("Access-Control-Allow-Origin", "*")
-		ww.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		ww.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization,Content-Type,Accept")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
-		next.ServeHTTP(ww, r)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -2124,16 +2304,9 @@ func (r *rrw) WriteHeader(code int) { r.status = code; r.ResponseWriter.WriteHea
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
-		ww := wrappedWriter{w} // ✅ use wrapped writer
-
-		next.ServeHTTP(ww, r)
-
-		log.Info("http",
-			zap.String("m", r.Method),
-			zap.String("p", r.URL.Path),
-			zap.String("t", time.Since(start).String()),
-		)
+		rw := &rrw{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rw, r)
+		log.Info("http", zap.String("m", r.Method), zap.String("p", r.URL.Path), zap.Int("s", rw.status), zap.Duration("t", time.Since(start)))
 	})
 }
 
@@ -2223,7 +2396,6 @@ func (h *H) updateMe(w http.ResponseWriter, r *http.Request) {
 func (h *H) getUser(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var u *User
-	// Try UUID first, then username
 	if len(id) == 36 {
 		u = h.svc.GetUser(r.Context(), id, uid(r))
 	}
@@ -2377,6 +2549,10 @@ func (h *H) createComment(w http.ResponseWriter, r *http.Request) {
 }
 func (h *H) listProjects(w http.ResponseWriter, r *http.Request) {
 	projects, _ := h.svc.ListProjects(r.Context(), uid(r), qs(r, "stage", ""), qs(r, "industry", ""), qi(r, "page", 1), qi(r, "limit", 20))
+	ok(w, projects)
+}
+func (h *H) myProjects(w http.ResponseWriter, r *http.Request) {
+	projects, _ := h.svc.MyProjects(r.Context(), uid(r))
 	ok(w, projects)
 }
 func (h *H) createProject(w http.ResponseWriter, r *http.Request) {
@@ -2623,6 +2799,64 @@ func (h *H) updateInterest(w http.ResponseWriter, r *http.Request) {
 	}
 	msgOK(w, "updated")
 }
+
+// ── Internship Handlers ──
+func (h *H) listInternships(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListInternships(r.Context(), uid(r), qs(r, "role", ""), qs(r, "remote", ""), qi(r, "page", 1), qi(r, "limit", 20))
+	if err != nil {
+		fail(w, "failed", 500)
+		return
+	}
+	ok(w, items)
+}
+func (h *H) createInternship(w http.ResponseWriter, r *http.Request) {
+	var b Internship
+	if decode(r, &b) != nil || b.Title == "" || b.ProjectID == "" {
+		fail(w, "title and project_id required", 400)
+		return
+	}
+	b.IsOpen = true
+	intern, err := h.svc.CreateInternship(r.Context(), uid(r), &b)
+	if err != nil {
+		fail(w, err.Error(), 400)
+		return
+	}
+	created(w, intern)
+}
+func (h *H) applyInternship(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		CoverLetter  string `json:"cover_letter"`
+		PortfolioURL string `json:"portfolio_url"`
+	}
+	decode(r, &b)
+	app, err := h.svc.ApplyInternship(r.Context(), uid(r), mux.Vars(r)["id"], b.CoverLetter, b.PortfolioURL)
+	if err != nil {
+		fail(w, err.Error(), 400)
+		return
+	}
+	created(w, app)
+}
+func (h *H) listInternshipApps(w http.ResponseWriter, r *http.Request) {
+	apps, err := h.svc.ListInternshipApplications(r.Context(), uid(r), mux.Vars(r)["id"])
+	if err != nil {
+		fail(w, err.Error(), 403)
+		return
+	}
+	ok(w, apps)
+}
+func (h *H) updateInternshipApp(w http.ResponseWriter, r *http.Request) {
+	var b struct{ Status string }
+	if decode(r, &b) != nil || b.Status == "" {
+		fail(w, "status required", 400)
+		return
+	}
+	if err := h.svc.UpdateInternshipAppStatus(r.Context(), uid(r), mux.Vars(r)["appId"], b.Status); err != nil {
+		fail(w, err.Error(), 403)
+		return
+	}
+	msgOK(w, "updated")
+}
+
 func (h *H) listConvs(w http.ResponseWriter, r *http.Request) {
 	convs, _ := h.svc.ListConvs(r.Context(), uid(r))
 	ok(w, convs)
@@ -2774,7 +3008,6 @@ func (h *H) wsConnect(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case "task_move":
-			// Real-time task drag-drop
 			if pl, ok2 := evt["payload"].(map[string]any); ok2 {
 				taskID, _ := pl["task_id"].(string)
 				newStatus, _ := pl["status"].(string)
@@ -2787,6 +3020,8 @@ func (h *H) wsConnect(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		case "ping":
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		}
 	}
 }
@@ -2825,6 +3060,7 @@ func buildRouter(h *H, a *Auth) http.Handler {
 	p.HandleFunc("/posts/{postId}/comments", h.createComment).Methods("POST")
 	p.HandleFunc("/projects", h.listProjects).Methods("GET")
 	p.HandleFunc("/projects", h.createProject).Methods("POST")
+	p.HandleFunc("/projects/mine", h.myProjects).Methods("GET")
 	p.HandleFunc("/projects/{id}", h.getProject).Methods("GET")
 	p.HandleFunc("/projects/{id}", h.updateProject).Methods("PUT", "PATCH")
 	p.HandleFunc("/projects/{projectId}/sections", h.upsertSection).Methods("POST")
@@ -2848,6 +3084,13 @@ func buildRouter(h *H, a *Auth) http.Handler {
 	p.HandleFunc("/projects/{projectId}/interests", h.getInterests).Methods("GET")
 	p.HandleFunc("/interests/{interestId}", h.updateInterest).Methods("PATCH")
 	p.HandleFunc("/projects/{projectId}/chat", h.projectChat).Methods("GET")
+	// Internship routes
+	p.HandleFunc("/internships", h.listInternships).Methods("GET")
+	p.HandleFunc("/internships", h.createInternship).Methods("POST")
+	p.HandleFunc("/internships/{id}/apply", h.applyInternship).Methods("POST")
+	p.HandleFunc("/internships/{id}/applications", h.listInternshipApps).Methods("GET")
+	p.HandleFunc("/internship-apps/{appId}", h.updateInternshipApp).Methods("PATCH")
+	// Messaging
 	p.HandleFunc("/conversations", h.listConvs).Methods("GET")
 	p.HandleFunc("/conversations", h.openConv).Methods("POST")
 	p.HandleFunc("/conversations/{id}/rename", h.renameGroup).Methods("PATCH")
@@ -2897,13 +3140,4 @@ func main() {
 	defer shutCancel()
 	srv.Shutdown(shutCtx)
 	log.Info("stopped")
-}
-
-type wrappedWriter struct {
-	http.ResponseWriter
-}
-
-// ✅ This is the key fix
-func (w wrappedWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return w.ResponseWriter.(http.Hijacker).Hijack()
 }
