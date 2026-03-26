@@ -38,7 +38,7 @@ type Config struct {
 func loadConfig() Config {
 	return Config{
 		Port:        envOr("PORT", "8080"),
-		DatabaseURL: envOr("DATABASE_URL", "postgres://postgres:password@localhost:5432/gemu?sslmode=disable"),
+		DatabaseURL: envOr("DATABASE_URL", "postgresql://postgres:Salman@40567633800@db.vounmegpaovvrfffolyf.supabase.co:5432/postgres?sslmode=require"),
 		JWTSecret:   envOr("JWT_SECRET", "founderlink-secret-change-me"),
 		Env:         envOr("ENV", "development"),
 	}
